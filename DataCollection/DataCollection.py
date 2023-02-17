@@ -134,6 +134,9 @@ class DataCollectionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
         self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
 
+        self.addObserver(slicer.mrmlScene, slicer.mrmlScene.NodeAddedEvent, self.updateTransformComboBox)
+
+
         # These connections ensure that whenever user changes some settings on the GUI, that is saved in the MRML scene
         # (in the selected parameter node).
         self.ui.GT_Selector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
@@ -147,8 +150,17 @@ class DataCollectionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.ui.invertOutputCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
         self.ui.invertedOutputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
 
+
+
         # Buttons
+        
+        self.ui.CreateTPSTransform.connect('clicked(bool)', self.onCreateTransform)
+
+
         self.ui.applyButton.connect('clicked(bool)', self.onApplyButton)
+
+
+
 
         # Make sure parameter node is initialized (needed for module reload)
         self.initializeParameterNode()
@@ -285,6 +297,10 @@ class DataCollectionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
 
 
+    def updateTransformComboBox(self, caller=None, event=None):
+        self.ui.GT_Selector.setMRMLScene(slicer.mrmlScene)
+
+
 
 
     def onCollectButton(self):
@@ -297,6 +313,14 @@ class DataCollectionWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             self.logic.collection(self.ui.GT_Selector.currentNode(), self.ui.Tracker_Selector.currentNode(),self.ui.GT_transform.currentNode(), self.ui.Tracker_transform.currentNode())
 
 
+    def onCreateTransform(self):
+        """
+        Run processing when user clicks "Apply" button.
+        """
+        with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
+
+            # Compute output
+            self.logic.transform(self.ui.GT_Selector.currentNode(), self.ui.Tracker_Selector.currentNode())
 
 
     def onApplyButton(self):
@@ -359,7 +383,39 @@ class DataCollectionLogic(ScriptedLoadableModuleLogic):
 
 
 
+    def transform(self, gt_points, tracker_points):
+        #fromFidsName = gt_points
+        #toFidsName = tracker_points
+        outputTransformName = "IsosurfaceTransform"
 
+        fromFids = gt_points#slicer.util.getFirstNodeByName(fromFidsName)
+        toFids = tracker_points#slicer.util.getFirstNodeByName(toFidsName)
+
+        numFids = fromFids.GetNumberOfControlPoints()
+
+        fp = vtk.vtkPoints()
+        tp = vtk.vtkPoints()
+        f = [0, 0, 0]
+        t = [0, 0, 0]
+
+        for i in range(numFids):
+            fromFids.GetNthControlPointPosition(i, f)
+            toFids.GetNthControlPointPosition(i, t)
+            fp.InsertNextPoint(f)
+            tp.InsertNextPoint(t)
+
+
+        tps = vtk.vtkThinPlateSplineTransform()
+        tps.SetSourceLandmarks(fp)
+        tps.SetTargetLandmarks(tp)
+        tps.SetBasisToR()
+
+        emRefToOpRefNode = slicer.util.getFirstNodeByName(outputTransformName)
+        if emRefToOpRefNode is None:
+            emRefToOpRefNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLTransformNode", outputTransformName)
+
+
+        emRefToOpRefNode.SetAndObserveTransformToParent(tps)
 
 
     def process(self, inputVolume, outputVolume, imageThreshold, invert=False, showResult=True):
