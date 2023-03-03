@@ -364,7 +364,7 @@ class DataCollectionLogic(ScriptedLoadableModuleLogic):
             parameterNode.SetParameter("Invert", "false")
 
 
-    def collection(self, gt_points, tracker_points, gt_transform, tracker_transform):
+    def collection(self, gt_points, tracker_points, gt_transform:slicer.vtkMRMLLinearTransformNode, tracker_transform:slicer.vtkMRMLLinearTransformNode):
         """
         Collect points for ground truth and tracker simultaniusly.
         Can be used without GUI widget.
@@ -373,15 +373,18 @@ class DataCollectionLogic(ScriptedLoadableModuleLogic):
         :param gt_transform: values above/below this threshold will be set to 0
         """
 
-        print(gt_transform.GetID)
-
-        gt_points.AddControlPoint(0,0,0)
-        gt_points.SetAndObserveTransformNodeID(gt_transform.GetID())
-
-        tracker_points.AddControlPoint(0,0,0)
-        tracker_points.SetAndObserveTransformNodeID(tracker_transform.GetID())
+        # Create a new transform node with the same parent as the tracking transform node
+        gt_new_transform = gt_transform
 
 
+        
+        gt_matrix = gt_transform.GetMatrixTransformToParent()
+        gt_x = gt_matrix.MultiplyPoint([0,0,0,1])
+        gt_points.AddControlPoint(gt_x[:3])
+
+        tracker_matrix = tracker_transform.GetMatrixTransformToParent()
+        tracker_x = tracker_matrix.MultiplyPoint([0,0,0,1])
+        tracker_points.AddControlPoint(tracker_x[:3])
 
     def transform(self, gt_points, tracker_points):
         #fromFidsName = gt_points
