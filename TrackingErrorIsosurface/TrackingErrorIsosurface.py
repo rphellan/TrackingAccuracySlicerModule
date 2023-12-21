@@ -1,4 +1,5 @@
 import logging
+import numpy as np
 import os
 
 import vtk
@@ -144,6 +145,7 @@ class TrackingErrorIsosurfaceWidget(ScriptedLoadableModuleWidget, VTKObservation
         self.ui.GT_transform.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
         self.ui.Tracker_transform.connect("currentNodeChanged(vtkMRMLNode*)", self.updateParameterNodeFromGUI)
 
+        self.ui.observeErrorButton.connect('clicked(bool)', self.onObserveError)
         self.ui.pointCollectionButton.connect('clicked(bool)', self.onCollectButton)
 
 
@@ -285,7 +287,13 @@ class TrackingErrorIsosurfaceWidget(ScriptedLoadableModuleWidget, VTKObservation
         with slicer.util.tryWithErrorDisplay("Failed to compute results.", waitCursor=True):
 
             # Compute output
-            self.logic.collection(self.ui.GT_Selector.currentNode(), self.ui.Tracker_Selector.currentNode(),self.ui.GT_transform.currentNode(), self.ui.Tracker_transform.currentNode())
+            info = self.logic.collection(self.ui.GT_Selector.currentNode(), self.ui.Tracker_Selector.currentNode(),self.ui.GT_transform.currentNode(), self.ui.Tracker_transform.currentNode())
+            
+            self.ui.labelError1.text = f"Min error: {round(info[0],2)}, max error: {round(info[1],2)}"
+            self.ui.labelError2.text = f"Avg error: {round(info[2],2)}, std dev: {round(info[3],2)}"
+            self.ui.labelX.text = f"Extension X: {round(info[4],2)}"
+            self.ui.labelY.text = f"Extension Y: {round(info[5],2)}"
+            self.ui.labelZ.text = f"Extension Z: {round(info[6],2)}"
 
 
     def onCreateTransform(self):
@@ -296,8 +304,22 @@ class TrackingErrorIsosurfaceWidget(ScriptedLoadableModuleWidget, VTKObservation
 
             # Compute output
             self.logic.transform(self.ui.GT_Selector.currentNode(), self.ui.Tracker_Selector.currentNode())
+    
+    def onObserveError(self):
+        self.ui.Tracker_transform.currentNode().AddObserver(slicer.vtkMRMLTransformNode.TransformModifiedEvent, self.onTrackerTransformNodeModified)
+         
+    def onTrackerTransformNodeModified(self, transformNode, a=None):
+        from vtk import vtkMatrix4x4
 
+        gt_matrix = vtk.vtkMatrix4x4()
+        self.ui.GT_transform.currentNode().GetMatrixTransformToWorld(gt_matrix)
+        gt_x = gt_matrix.MultiplyPoint([0,0,0,1])
 
+        tracker_matrix = vtk.vtkMatrix4x4()
+        self.ui.Tracker_transform.currentNode().GetMatrixTransformToWorld(tracker_matrix)
+        tracker_x = tracker_matrix.MultiplyPoint([0,0,0,1])
+        
+        self.ui.labelCurrentError.text = f"Current error: {round(np.linalg.norm(np.array(gt_x)-np.array(tracker_x)),2)}"
 
 #
 # TrackingErrorIsosurfaceLogic
@@ -352,6 +374,28 @@ class TrackingErrorIsosurfaceLogic(ScriptedLoadableModuleLogic):
         tracker_transform.GetMatrixTransformToWorld(tracker_matrix)
         tracker_x = tracker_matrix.MultiplyPoint([0,0,0,1])
         tracker_points.AddControlPoint(tracker_x[:3])
+        
+        arr_error = []
+        arr_x, arr_y, arr_z = [], [], []
+        
+        for gt_i in range(gt_points.GetNumberOfControlPoints()):
+            ras_gt = vtk.vtkVector3d(0,0,0)
+            gt_points.GetNthControlPointPosition(gt_i,ras_gt)
+            
+            ras_tr = vtk.vtkVector3d(0,0,0)
+            tracker_points.GetNthControlPointPosition(gt_i,ras_tr)
+            
+            error_i = np.linalg.norm(np.array(ras_gt)-np.array(ras_tr))
+
+            arr_error.append(error_i)
+            arr_x.append(ras_gt[0])
+            arr_y.append(ras_gt[1])
+            arr_z.append(ras_gt[2])
+	
+        return [np.min(arr_error), np.max(arr_error), np.mean(arr_error), np.std(arr_error),
+                np.max(arr_x)-np.min(arr_x), np.max(arr_y)-np.min(arr_y), np.max(arr_z)-np.min(arr_z)]
+            
+            
 
     def transform(self, gt_points, tracker_points):
         #fromFidsName = gt_points
